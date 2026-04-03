@@ -162,7 +162,33 @@ fn git_install_root_from_path(git_path: &Path) -> Option<PathBuf> {
 		return Some(grandparent.to_path_buf());
 	}
 
+	// Scoop uses a shim directory. Companion .shim files contain the real path
+	// (e.g. "path = C:\\...\\git.exe"). Resolve via the shim metadata.
+	if parent_name.eq_ignore_ascii_case("shims")
+		&& let Some(actual) = resolve_scoop_shim(git_path)
+	{
+		return git_install_root_from_path(Path::new(&actual));
+	}
+
 	parent.parent().map(Path::to_path_buf)
+}
+
+/// Read a Scoop `.shim` companion file to find the real executable path.
+/// Shim files are plain text with a line like `path = "C:\\...\\git.exe"`.
+fn resolve_scoop_shim(shim_path: &Path) -> Option<String> {
+	let stem = shim_path.file_stem()?.to_string_lossy().into_owned();
+	let shim_meta_path = shim_path.with_file_name(format!("{stem}.shim"));
+	let content = std::fs::read_to_string(&shim_meta_path).ok()?;
+	for line in content.lines() {
+		let line = line.trim();
+		if let Some(path) = line.strip_prefix("path =") {
+			let resolved = path.trim().trim_matches('"').to_owned();
+			if !resolved.is_empty() {
+				return Some(resolved);
+			}
+		}
+	}
+	None
 }
 
 fn git_paths_for_install_root(install_root: &str) -> Vec<String> {
